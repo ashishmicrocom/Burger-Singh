@@ -1,0 +1,4 @@
+code,name,email,password,phone,address,city,state,pincode
+BS-DEL-001,Delhi Store 1,delhi1@burgersingh.com,Password@123,+91 9876543210,123 Main Street,Delhi,Delhi,110001
+BS-MUM-001,Mumbai Store 1,mumbai1@burgersingh.com,Password@123,+91 9876543211,456 Park Road,Mumbai,Maharashtra,400001
+BS-BLR-001,Bangalore Store 1,bangalore1@burgersingh.com,Password@123,+91 9876543212,789 Tech Hub,Bangalore,Karnataka,560001
