@@ -230,7 +230,7 @@ const ManagerDashboard = () => {
       <header className="sticky top-0 z-40 glass border-b">
         <div className="container mx-auto px-4 h-16 flex items-center gap-4">
           <div className="flex items-center justify-center">
-              <img src="public/burgersingh-logo.png" className="h-14 w-14" alt="" />
+              <img src="/burgersingh-logo.png" className="h-14 w-14" alt="" />
             </div>
           <div className="flex-1">
             <h1 className="font-semibold text-foreground">{t("dashboard.outletDashboard")}</h1>

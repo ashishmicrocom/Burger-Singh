@@ -63,7 +63,13 @@ class ApiService {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Request failed');
+        const error: any = new Error(data.message || 'Request failed');
+        error.response = { 
+          status: response.status, 
+          data: data,
+          statusText: response.statusText 
+        };
+        throw error;
       }
 
       return data;
@@ -270,9 +276,12 @@ class ApiService {
   }
 
   async deleteOutlet(id: string): Promise<{ success: boolean; message: string }> {
-    return this.request(`/outlets/${id}`, {
+    console.log('🌐 API Service: DELETE request to /outlets/' + id);
+    const result = await this.request<{ success: boolean; message: string }>(`/outlets/${id}`, {
       method: 'DELETE',
     });
+    console.log('🌐 API Service: DELETE response:', result);
+    return result;
   }
 
   async bulkImportOutlets(outlets: any[]): Promise<{ success: boolean; message: string; successCount: number; failureCount: number; errors: any[] }> {
@@ -495,6 +504,35 @@ class ApiService {
     return this.request('/otp/verify-email', {
       method: 'POST',
       body: JSON.stringify({ email, otp }),
+    });
+  }
+
+  // ID Verification endpoints
+  async verifyPAN(panNumber: string, name?: string, dob?: string, onboardingId?: string): Promise<{ success: boolean; verified: boolean; message?: string; data?: any }> {
+    return this.request('/onboarding/verify-pan', {
+      method: 'POST',
+      body: JSON.stringify({ panNumber, name, dob, onboardingId }),
+    });
+  }
+
+  async initiateAadhaarVerification(
+    redirectUrl: string, 
+    onboardingId?: string
+  ): Promise<{ success: boolean; clientId?: string; digilockerUrl?: string; expiresAt?: string; message?: string }> {
+    return this.request('/onboarding/verify-aadhaar/initiate', {
+      method: 'POST',
+      body: JSON.stringify({ redirectUrl, onboardingId }),
+    });
+  }
+
+  async checkAadhaarVerificationStatus(
+    clientId?: string, 
+    onboardingId?: string,
+    urlStatus?: string
+  ): Promise<{ success: boolean; verified: boolean; status?: string; message?: string; data?: any }> {
+    return this.request('/onboarding/verify-aadhaar/status', {
+      method: 'POST',
+      body: JSON.stringify({ clientId, onboardingId, urlStatus }),
     });
   }
 

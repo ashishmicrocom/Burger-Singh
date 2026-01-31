@@ -17,7 +17,7 @@ interface DocumentPreviewProps {
 export const DocumentPreview = ({
   title,
   document,
-  baseUrl = "http://localhost:5000",
+  baseUrl = "https://burgersingfrontbackend.kamaaupoot.in",
 }: DocumentPreviewProps) => {
   const [imageError, setImageError] = useState(false);
   

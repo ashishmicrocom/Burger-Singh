@@ -109,7 +109,7 @@ const Index = () => {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex items-center justify-center">
-              <img src="public/burgersingh-logo.png" className="h-14 w-14" alt="" />
+              <img src="/burgersingh-logo.png" className="h-14 w-14" alt="" />
             </div>
             <div>
               <h1 className="font-bold text-foreground leading-tight">Burger Singh</h1>

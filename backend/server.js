@@ -1,6 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+
+// Load environment variables FIRST before any other imports
+dotenv.config();
+
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -19,7 +23,6 @@ import publicRoutes from './routes/publicRoutes.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-dotenv.config();
 connectDB();
 
 const app = express();
@@ -27,9 +30,10 @@ const app = express();
 // Middleware
 app.use(cors({
   origin: [
-    'http://localhost:8080', 
+    'http://localhost:8080',
     'http://localhost:8081',
     'https://burgersingfrontend.kamaaupoot.in',
+    'https://burgersingfrontbackend.kamaaupoot.in',
     process.env.CLIENT_URL
   ].filter(Boolean),
   credentials: true,
@@ -100,7 +104,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5555;
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);

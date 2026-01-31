@@ -25,7 +25,7 @@ const LoginRedirect = () => {
       return <Navigate to="/manager-dashboard" replace />;
     case "field_coach":
       return <Navigate to="/field-coach-dashboard" replace />;
-    default:
+    default: 
       return <Navigate to="/" replace />;
   }
 };

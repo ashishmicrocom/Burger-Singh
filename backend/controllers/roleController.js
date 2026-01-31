@@ -171,12 +171,12 @@ export const deleteRole = async (req, res) => {
       });
     }
 
-    role.isActive = false;
-    await role.save();
+    // Permanently delete the role from database
+    await Role.deleteOne({ _id: role._id });
 
     res.status(200).json({
       success: true,
-      message: 'Role deactivated successfully'
+      message: 'Role permanently deleted from database'
     });
 
   } catch (error) {

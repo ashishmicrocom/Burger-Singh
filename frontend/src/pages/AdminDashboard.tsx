@@ -206,6 +206,12 @@ const AdminDashboard = () => {
   const [storeFilter, setStoreFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [coachFilter, setCoachFilter] = useState<string>("all");
+  
+  // Field Coach filters
+  const [coachSearch, setCoachSearch] = useState("");
+  
+  // Outlet filters
+  const [outletSearch, setOutletSearch] = useState("");
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showDocumentsModal, setShowDocumentsModal] = useState(false);
@@ -374,6 +380,26 @@ const AdminDashboard = () => {
     return matchesSearch && matchesStore && matchesStatus && matchesCoach && matchesTab;
   });
 
+  // Field Coach filtering
+  const filteredFieldCoaches = fieldCoaches.filter(coach => {
+    const matchesSearch = 
+      coach.name.toLowerCase().includes(coachSearch.toLowerCase()) ||
+      coach.email.toLowerCase().includes(coachSearch.toLowerCase()) ||
+      (coach.phone && coach.phone.includes(coachSearch));
+    
+    return matchesSearch;
+  });
+
+  // Outlet filtering
+  const filteredOutlets = stores.filter(store => {
+    const matchesSearch = 
+      store.name.toLowerCase().includes(outletSearch.toLowerCase()) ||
+      store.code.toLowerCase().includes(outletSearch.toLowerCase()) ||
+      (store.email && store.email.toLowerCase().includes(outletSearch.toLowerCase()));
+    
+    return matchesSearch;
+  });
+
   const handleExport = async () => {
     try {
       const filters: any = {};
@@ -539,13 +565,19 @@ const AdminDashboard = () => {
   const handleDeleteOutlet = async () => {
     if (!selectedOutlet) return;
     
+    console.log('🗑️ Frontend: Deleting outlet:', selectedOutlet);
+    
     try {
-      await apiService.deleteOutlet(selectedOutlet.id);
+      console.log('🗑️ Frontend: Calling API to delete outlet ID:', selectedOutlet.id);
+      const response = await apiService.deleteOutlet(selectedOutlet.id);
+      console.log('✅ Frontend: Delete response:', response);
+      
       setShowDeleteOutletModal(false);
       setSelectedOutlet(null);
       toast.success("Outlet deleted successfully!");
       loadData();
     } catch (error: any) {
+      console.error('❌ Frontend: Delete error:', error);
       toast.error(error.message || "Failed to delete outlet");
     }
   };
@@ -625,7 +657,11 @@ const AdminDashboard = () => {
         address: "123 Main Street",
         city: "Delhi",
         state: "Delhi",
-        pincode: "110001"
+        pincode: "110001",
+        fieldCoach: "Amit Sharma",
+        fieldCoachEmail: "amit@burgersingh.com",
+        fieldCoachPhone: "+91 9000000001",
+        fieldCoachPassword: "Coach@123"
       },
       {
         code: "BS-MUM-001",
@@ -636,14 +672,18 @@ const AdminDashboard = () => {
         address: "456 Park Road",
         city: "Mumbai",
         state: "Maharashtra",
-        pincode: "400001"
+        pincode: "400001",
+        fieldCoach: "Ravi Kumar",
+        fieldCoachEmail: "ravi@burgersingh.com",
+        fieldCoachPhone: "",
+        fieldCoachPassword: ""
       }
     ];
 
     // Create CSV content
-    const headers = "code,name,email,password,phone,address,city,state,pincode\n";
+    const headers = "code,name,email,password,phone,address,city,state,pincode,fieldCoach,fieldCoachEmail,fieldCoachPhone,fieldCoachPassword\n";
     const rows = sampleData.map(row => 
-      `${row.code},${row.name},${row.email},${row.password},${row.phone},"${row.address}",${row.city},${row.state},${row.pincode}`
+      `${row.code},${row.name},${row.email},${row.password},${row.phone},"${row.address}",${row.city},${row.state},${row.pincode},${row.fieldCoach},${row.fieldCoachEmail},${row.fieldCoachPhone},${row.fieldCoachPassword}`
     ).join("\n");
     
     const csvContent = headers + rows;
@@ -790,10 +830,10 @@ const AdminDashboard = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background flex">
+    <div className="h-screen bg-background flex overflow-hidden">
       {/* Sidebar */}
       <aside className={cn(
-        "fixed lg:static inset-y-0 left-0 z-50 bg-card border-r transition-all duration-300",
+        "fixed inset-y-0 left-0 z-50 bg-card border-r transition-all duration-300 h-screen",
         sidebarOpen ? "w-64" : "w-0 lg:w-16",
         !sidebarOpen && "overflow-hidden"
       )}>
@@ -801,7 +841,7 @@ const AdminDashboard = () => {
           {/* Sidebar Header */}
           <div className="h-16 flex items-center gap-3 px-4 border-b">
             <div className="flex items-center justify-center">
-              <img src="public/burgersingh-logo.png" className="h-14 w-14" alt="" />
+              <img src="/burgersingh-logo.png" className="h-14 w-14" alt="" />
             </div>
             {sidebarOpen && (
               <div className="overflow-hidden">
@@ -856,9 +896,12 @@ const AdminDashboard = () => {
       </aside>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className={cn(
+        "flex-1 flex flex-col min-w-0 transition-all duration-300 h-screen",
+        sidebarOpen ? "ml-64" : "ml-0 lg:ml-16"
+      )}>
         {/* Top Header */}
-        <header className="sticky top-0 z-40 h-16 bg-card border-b flex items-center gap-4 px-4">
+        <header className="sticky top-0 z-40 h-16 bg-card border-b flex items-center gap-4 px-4 flex-shrink-0">
           <Button
             variant="ghost"
             size="icon"
@@ -881,7 +924,7 @@ const AdminDashboard = () => {
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 p-4 lg:p-6 overflow-auto">
+        <main className="flex-1 p-4 lg:p-6 overflow-y-auto">
           {/* Dashboard Section */}
           {activeSection === "dashboard" && (
             <div className="space-y-6">
@@ -1269,6 +1312,19 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
+              {/* Search Bar */}
+              <div className="bg-card border rounded-xl p-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search outlets by name, code, or email..."
+                    value={outletSearch}
+                    onChange={(e) => setOutletSearch(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+
               <div className="bg-card border rounded-xl overflow-hidden">
                 <Table>
                   <TableHeader>
@@ -1283,7 +1339,7 @@ const AdminDashboard = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {stores.map((store) => (
+                    {filteredOutlets.map((store) => (
                       <TableRow key={store.id}>
                         <TableCell className="font-medium">{store.name}</TableCell>
                         <TableCell>{store.code}</TableCell>
@@ -1421,6 +1477,19 @@ const AdminDashboard = () => {
                 </Button>
               </div>
 
+              {/* Search Bar */}
+              <div className="bg-card border rounded-xl p-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search field coaches by name, email, or phone..."
+                    value={coachSearch}
+                    onChange={(e) => setCoachSearch(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+              </div>
+
               <div className="bg-card border rounded-xl overflow-hidden">
                 <Table>
                   <TableHeader>
@@ -1434,7 +1503,7 @@ const AdminDashboard = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {fieldCoaches.map((coach) => (
+                    {filteredFieldCoaches.map((coach) => (
                       <TableRow key={coach.id}>
                         <TableCell className="font-medium">{coach.name}</TableCell>
                         <TableCell>{coach.email}</TableCell>
@@ -1442,21 +1511,20 @@ const AdminDashboard = () => {
                         <TableCell>
                           <div className="flex flex-wrap gap-1">
                             {coach.assignedOutlets?.length > 0 ? (
-                              coach.assignedOutlets.slice(0, 2).map((outletId: string) => {
-                                const outlet = stores.find(s => s.id === outletId);
+                              coach.assignedOutlets.map((outletCode: string) => {
+                                const outlet = stores.find(s => s.code === outletCode || s.id === outletCode);
                                 return outlet ? (
-                                  <Badge key={outletId} variant="outline" className="text-xs">
+                                  <Badge key={outletCode} variant="outline" className="text-xs">
                                     {outlet.code}
                                   </Badge>
-                                ) : null;
+                                ) : (
+                                  <Badge key={outletCode} variant="outline" className="text-xs">
+                                    {outletCode}
+                                  </Badge>
+                                );
                               })
                             ) : (
                               <span className="text-sm text-muted-foreground">None</span>
-                            )}
-                            {coach.assignedOutlets?.length > 2 && (
-                              <Badge variant="outline" className="text-xs">
-                                +{coach.assignedOutlets.length - 2}
-                              </Badge>
                             )}
                           </div>
                         </TableCell>
@@ -1841,7 +1909,7 @@ const AdminDashboard = () => {
                 
                 // If it contains full path, extract just the filename
                 if (cleanPath.includes('\\') || cleanPath.includes('/')) {
-                  cleanPath = cleanPath.split(/[\\\/]/).pop() || cleanPath;
+                  cleanPath = cleanPath.split(/[\\/]/).pop() || cleanPath;
                 }
                 
                 // Ensure it has onboarding/ prefix
@@ -1849,7 +1917,7 @@ const AdminDashboard = () => {
                   cleanPath = `onboarding/${cleanPath}`;
                 }
                 
-                const photoUrl = `http://localhost:5000/uploads/${cleanPath}`;
+                const photoUrl = `https://burgersingfrontbackend.kamaaupoot.in/uploads/${cleanPath}`;
                 
                 return (
                   <div className="p-4 border rounded-lg space-y-3">
@@ -2148,40 +2216,46 @@ const AdminDashboard = () => {
 
       {/* Import Outlets Modal */}
       <Dialog open={showImportOutletModal} onOpenChange={setShowImportOutletModal}>
-        <DialogContent>
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Import Outlets from Excel/CSV</DialogTitle>
             <DialogDescription>Upload an Excel (.xlsx, .xls) or CSV file to import multiple outlets at once</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <div className="border-2 border-dashed rounded-lg p-6 text-center">
-              <Upload className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+          <div className="space-y-4 mt-4 overflow-y-auto flex-1 pr-2">
+            <div className="border-2 border-dashed rounded-lg p-4 sm:p-6 text-center">
+              <Upload className="w-10 h-10 sm:w-12 sm:h-12 mx-auto text-muted-foreground mb-3 sm:mb-4" />
               <Input
                 type="file"
                 accept=".xlsx,.xls,.csv"
                 onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-                className="max-w-xs mx-auto"
+                className="max-w-xs mx-auto text-sm"
               />
               {importFile && (
-                <p className="text-sm text-green-600 mt-2">
+                <p className="text-sm text-green-600 mt-2 truncate px-2">
                   Selected: {importFile.name}
                 </p>
               )}
             </div>
             
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 sm:p-4">
               <h4 className="font-medium text-sm mb-2">Required Columns (Excel/CSV):</h4>
-              <ul className="text-xs space-y-1 text-blue-800">
-                <li>• <strong>code</strong> - Unique outlet code (e.g., BS-DEL-001)</li>
-                <li>• <strong>name</strong> - Outlet name</li>
-                <li>• <strong>email</strong> - Outlet email (must be unique)</li>
-                <li>• <strong>password</strong> - Login password</li>
-                <li>• <strong>address</strong> - Full address</li>
-                <li>• <strong>city</strong> - City name</li>
-                <li>• <strong>state</strong> - State name (optional)</li>
-                <li>• <strong>pincode</strong> - Postal code (optional)</li>
-                <li>• <strong>phone</strong> - Contact number (optional)</li>
-              </ul>
+              <div className="max-h-48 overflow-y-auto pr-2">
+                <ul className="text-xs space-y-1 text-blue-800">
+                  <li>• <strong>code</strong> - Unique outlet code (e.g., BS-DEL-001)</li>
+                  <li>• <strong>name</strong> - Outlet name</li>
+                  <li>• <strong>email</strong> - Outlet email (must be unique)</li>
+                  <li>• <strong>password</strong> - Login password</li>
+                  <li>• <strong>address</strong> - Full address</li>
+                  <li>• <strong>city</strong> - City name</li>
+                  <li>• <strong>state</strong> - State name (optional)</li>
+                  <li>• <strong>pincode</strong> - Postal code (optional)</li>
+                  <li>• <strong>phone</strong> - Contact number (optional)</li>
+                  <li>• <strong>fieldCoach</strong> - Field Coach Name</li>
+                  <li>• <strong>fieldCoachEmail</strong> - Field coach Email (unique)</li>
+                  <li>• <strong>fieldCoachPhone</strong> - Field Coach Phone</li>
+                  <li>• <strong>fieldCoachPassword</strong> - Field coach Password</li>
+                </ul>
+              </div>
             </div>
 
             <div className="flex items-center justify-between pt-2">
@@ -2191,11 +2265,12 @@ const AdminDashboard = () => {
                 onClick={downloadSampleExcel}
               >
                 <Download className="w-4 h-4 mr-2" />
-                Download Sample
+                <span className="hidden sm:inline">Download Sample</span>
+                <span className="sm:hidden">Sample</span>
               </Button>
             </div>
           </div>
-          <DialogFooter className="mt-6">
+          <DialogFooter className="mt-4 sm:mt-6 flex-shrink-0">
             <Button variant="outline" onClick={() => {
               setShowImportOutletModal(false);
               setImportFile(null);
@@ -2209,12 +2284,14 @@ const AdminDashboard = () => {
               {importing ? (
                 <>
                   <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  Importing...
+                  <span className="hidden sm:inline">Importing...</span>
+                  <span className="sm:hidden">Import</span>
                 </>
               ) : (
                 <>
                   <Upload className="w-4 h-4 mr-2" />
-                  Import Outlets
+                  <span className="hidden sm:inline">Import Outlets</span>
+                  <span className="sm:hidden">Import</span>
                 </>
               )}
             </Button>

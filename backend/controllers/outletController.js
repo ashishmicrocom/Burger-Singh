@@ -1,5 +1,6 @@
 import Outlet from '../models/Outlet.js';
 import Onboarding from '../models/Onboarding.js';
+import User from '../models/User.js';
 
 // @desc    Get all active outlets
 // @route   GET /api/outlets
@@ -137,6 +138,15 @@ export const createOutlet = async (req, res) => {
       fieldCoach
     });
 
+    // Add outlet code to field coach's assignedStores if field coach is assigned
+    if (fieldCoach) {
+      await User.findByIdAndUpdate(
+        fieldCoach,
+        { $addToSet: { assignedStores: outlet.code } },
+        { new: true }
+      );
+    }
+
     // Return outlet without password
     const outletData = outlet.toObject();
     delete outletData.password;
@@ -171,11 +181,36 @@ export const updateOutlet = async (req, res) => {
       });
     }
 
+    const oldFieldCoachId = outlet.fieldCoach?.toString();
+    const newFieldCoachId = req.body.fieldCoach;
+
     const updatedOutlet = await Outlet.findByIdAndUpdate(
       req.params.id,
       req.body,
       { new: true, runValidators: true }
     ).populate('manager', 'name email').populate('fieldCoach', 'name email').lean();
+
+    // Handle field coach assignment changes
+    if (newFieldCoachId && newFieldCoachId !== oldFieldCoachId) {
+      // Remove outlet from old field coach's assignedStores
+      if (oldFieldCoachId) {
+        await User.findByIdAndUpdate(
+          oldFieldCoachId,
+          { $pull: { assignedStores: outlet.code } }
+        );
+      }
+      // Add outlet to new field coach's assignedStores
+      await User.findByIdAndUpdate(
+        newFieldCoachId,
+        { $addToSet: { assignedStores: outlet.code } }
+      );
+    } else if (!newFieldCoachId && oldFieldCoachId && req.body.hasOwnProperty('fieldCoach')) {
+      // Field coach was removed
+      await User.findByIdAndUpdate(
+        oldFieldCoachId,
+        { $pull: { assignedStores: outlet.code } }
+      );
+    }
 
     // Get employee count
     const employeeCount = await Onboarding.countDocuments({ 
@@ -240,19 +275,24 @@ export const toggleOutletStatus = async (req, res) => {
   }
 };
 
-// @desc    Delete outlet (soft delete)
+// @desc    Delete outlet (PERMANENT DELETE - NOT SOFT DELETE)
 // @route   DELETE /api/outlets/:id
 // @access  Private (Admin only)
 export const deleteOutlet = async (req, res) => {
   try {
+    console.log('=== PERMANENT DELETE OUTLET ===');
+    console.log('Outlet ID to delete:', req.params.id);
+
     const outlet = await Outlet.findById(req.params.id);
 
     if (!outlet) {
       return res.status(404).json({
         success: false,
-        message: 'Outlet not found'
+        message: 'Outlet not found in database'
       });
     }
+
+    console.log('Found outlet to delete:', outlet.name, outlet.code);
 
     // Check if outlet has active employees
     const employeeCount = await Onboarding.countDocuments({ 
@@ -267,13 +307,23 @@ export const deleteOutlet = async (req, res) => {
       });
     }
 
-    outlet.isActive = false;
-    await outlet.save();
+    // PERMANENTLY DELETE from MongoDB
+    const deleteResult = await Outlet.deleteOne({ _id: req.params.id });
+    
+    console.log('Delete result:', deleteResult);
 
-    res.status(200).json({
-      success: true,
-      message: 'Outlet deactivated successfully'
-    });
+    if (deleteResult.deletedCount === 1) {
+      console.log('OUTLET PERMANENTLY DELETED FROM DATABASE');
+      return res.status(200).json({
+        success: true,
+        message: 'Outlet permanently deleted from database'
+      });
+    } else {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to delete outlet'
+      });
+    }
 
   } catch (error) {
     console.error('Delete outlet error:', error);
@@ -310,35 +360,148 @@ export const bulkImportOutlets = async (req, res) => {
       const rowNum = i + 2; // +2 because Excel is 1-indexed and has header row
 
       try {
+        // Normalize column names (handle both camelCase and space-separated formats)
+        const normalizedData = {
+          code: outletData.code || outletData.Code,
+          name: outletData.name || outletData.Name,
+          email: outletData.email || outletData.Email,
+          password: outletData.password || outletData.Password,
+          phone: outletData.phone || outletData.Phone,
+          address: outletData.address || outletData.Address,
+          city: outletData.city || outletData.City,
+          state: outletData.state || outletData.State,
+          pincode: outletData.pincode || outletData.Pincode,
+          fieldCoach: outletData.fieldCoach || outletData['Field Coach'],
+          fieldCoachEmail: outletData.fieldCoachEmail || outletData['Field Coach Email'],
+          fieldCoachPhone: outletData.fieldCoachPhone || outletData['Field Coach Phone'],
+          fieldCoachPassword: outletData.fieldCoachPassword || outletData['Field Coach Password']
+        };
+
         // Validate required fields
-        if (!outletData.code || !outletData.name || !outletData.email || !outletData.password || !outletData.address || !outletData.city) {
+        if (!normalizedData.code || !normalizedData.name || !normalizedData.email || !normalizedData.password || !normalizedData.address || !normalizedData.city) {
           results.errors.push({
             row: rowNum,
-            code: outletData.code || 'N/A',
+            code: normalizedData.code || 'N/A',
             error: 'Missing required fields (code, name, email, password, address, city)'
           });
           results.failureCount++;
           continue;
         }
 
-        // Check if outlet code already exists
-        const existingCode = await Outlet.findOne({ code: outletData.code });
-        if (existingCode) {
+        // Validate Field Coach and Field Coach Email are required
+        if (!normalizedData.fieldCoach || !normalizedData.fieldCoachEmail) {
           results.errors.push({
             row: rowNum,
-            code: outletData.code,
-            error: 'Outlet with this code already exists'
+            code: normalizedData.code || 'N/A',
+            error: 'Missing required fields (fieldCoach/Field Coach, fieldCoachEmail/Field Coach Email)'
           });
           results.failureCount++;
           continue;
         }
 
-        // Check if email already exists
-        const existingEmail = await Outlet.findOne({ email: outletData.email });
+        // Use normalized data for the rest of the processing
+        const outletDataNormalized = normalizedData;
+
+        // Look up field coach by email or create if password provided
+        let fieldCoachId = undefined;
+        if (outletDataNormalized.fieldCoachEmail) {
+          let fieldCoachUser = await User.findOne({ 
+            email: outletDataNormalized.fieldCoachEmail.trim().toLowerCase(),
+            role: 'field_coach'
+          });
+          
+          if (!fieldCoachUser) {
+            // Use outlet's password and phone as fallback for field coach
+            const coachPassword = outletDataNormalized.fieldCoachPassword || outletDataNormalized.password;
+            const coachPhone = outletDataNormalized.fieldCoachPhone || outletDataNormalized.phone;
+            
+            // If field coach doesn't exist and password is provided, create them
+            if (coachPassword) {
+              try {
+                fieldCoachUser = await User.create({
+                  name: outletDataNormalized.fieldCoach ? outletDataNormalized.fieldCoach.trim() : 'Field Coach',
+                  email: outletDataNormalized.fieldCoachEmail.trim().toLowerCase(),
+                  password: coachPassword,
+                  role: 'field_coach',
+                  phone: coachPhone ? coachPhone.toString().trim() : undefined,
+                  isActive: true
+                });
+              } catch (createError) {
+                results.errors.push({
+                  row: rowNum,
+                  code: outletDataNormalized.code,
+                  error: `Failed to create Field Coach: ${createError.message}`
+                });
+                results.failureCount++;
+                continue;
+              }
+            } else {
+              results.errors.push({
+                row: rowNum,
+                code: outletDataNormalized.code,
+                error: `Field Coach with email '${outletDataNormalized.fieldCoachEmail}' not found. Provide fieldCoachPassword or outlet password to create a new field coach.`
+              });
+              results.failureCount++;
+              continue;
+            }
+          } else {
+            // Update phone if provided for existing field coach (prefer fieldCoachPhone, fallback to outlet phone)
+            const phoneToUpdate = outletDataNormalized.fieldCoachPhone || outletDataNormalized.phone;
+            if (phoneToUpdate && !fieldCoachUser.phone) {
+              fieldCoachUser.phone = phoneToUpdate.toString().trim();
+              await fieldCoachUser.save();
+            }
+          }
+          fieldCoachId = fieldCoachUser._id;
+        }
+
+        // Check if outlet code already exists
+        const existingOutlet = await Outlet.findOne({ code: outletDataNormalized.code });
+        
+        if (existingOutlet) {
+          // Update existing outlet
+          const oldFieldCoachId = existingOutlet.fieldCoach?.toString();
+          
+          // Update the outlet with new data
+          existingOutlet.name = outletDataNormalized.name.trim();
+          existingOutlet.address = outletDataNormalized.address.trim();
+          existingOutlet.city = outletDataNormalized.city.trim();
+          if (outletDataNormalized.state) existingOutlet.state = outletDataNormalized.state.trim();
+          if (outletDataNormalized.pincode) existingOutlet.pincode = outletDataNormalized.pincode.toString().trim();
+          if (outletDataNormalized.phone) existingOutlet.phone = outletDataNormalized.phone.toString().trim();
+          
+          // Update field coach if changed
+          if (fieldCoachId && fieldCoachId.toString() !== oldFieldCoachId) {
+            existingOutlet.fieldCoach = fieldCoachId;
+            
+            // Remove outlet from old field coach's assignedStores
+            if (oldFieldCoachId) {
+              await User.findByIdAndUpdate(
+                oldFieldCoachId,
+                { $pull: { assignedStores: existingOutlet.code } },
+                { new: true }
+              );
+            }
+            
+            // Add outlet to new field coach's assignedStores
+            await User.findByIdAndUpdate(
+              fieldCoachId,
+              { $addToSet: { assignedStores: existingOutlet.code } },
+              { new: true }
+            );
+          }
+          
+          await existingOutlet.save();
+          results.successCount++;
+          continue;
+        }
+
+        // Check if email already exists (only for new outlets)
+        const existingEmail = await Outlet.findOne({ email: outletDataNormalized.email });
         if (existingEmail) {
           results.errors.push({
             row: rowNum,
-            code: outletData.code,
+            code: outletDataNormalized.code,
             error: 'Outlet with this email already exists'
           });
           results.failureCount++;
@@ -346,25 +509,34 @@ export const bulkImportOutlets = async (req, res) => {
         }
 
         // Create the outlet
-        await Outlet.create({
-          code: outletData.code.trim(),
-          name: outletData.name.trim(),
-          email: outletData.email.trim().toLowerCase(),
-          password: outletData.password,
-          address: outletData.address.trim(),
-          city: outletData.city.trim(),
-          state: outletData.state ? outletData.state.trim() : undefined,
-          pincode: outletData.pincode ? outletData.pincode.toString().trim() : undefined,
-          phone: outletData.phone ? outletData.phone.toString().trim() : undefined,
+        const newOutlet = await Outlet.create({
+          code: outletDataNormalized.code.trim(),
+          name: outletDataNormalized.name.trim(),
+          email: outletDataNormalized.email.trim().toLowerCase(),
+          password: outletDataNormalized.password,
+          address: outletDataNormalized.address.trim(),
+          city: outletDataNormalized.city.trim(),
+          state: outletDataNormalized.state ? outletDataNormalized.state.trim() : undefined,
+          pincode: outletDataNormalized.pincode ? outletDataNormalized.pincode.toString().trim() : undefined,
+          phone: outletDataNormalized.phone ? outletDataNormalized.phone.toString().trim() : undefined,
           manager: undefined,
-          fieldCoach: undefined
+          fieldCoach: fieldCoachId
         });
+
+        // Add outlet code to field coach's assignedStores if not already present
+        if (fieldCoachId) {
+          await User.findByIdAndUpdate(
+            fieldCoachId,
+            { $addToSet: { assignedStores: newOutlet.code } },
+            { new: true }
+          );
+        }
 
         results.successCount++;
       } catch (error) {
         results.errors.push({
           row: rowNum,
-          code: outletData.code || 'N/A',
+          code: outletData.code || normalizedData?.code || 'N/A',
           error: error.message || 'Failed to create outlet'
         });
         results.failureCount++;

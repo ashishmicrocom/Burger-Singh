@@ -70,12 +70,14 @@ interface FormData {
   lowerSize: string;
   aadhaarNumber: string;
   panNumber: string;
+  idType: string;
   idDocuments: File | null;
   dateOfJoining: string;
   covidVaccinated: boolean;
 
   // Step 6: Verification
   aadhaarVerified: boolean;
+  panVerified: boolean;
   panDocument: File | null;
 
   // Employment Details (for final submission)
@@ -90,9 +92,35 @@ interface FormData {
 const Onboarding = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { role, outlet } = location.state || {};
+  
+  // Check if returning from Digilocker BEFORE any state initialization
+  const urlParams = new URLSearchParams(window.location.search);
+  const isDigilockerReturn = urlParams.get('type') === 'digilocker' && !!urlParams.get('client_id');
+  
+  // Get role and outlet from location state or localStorage
+  const getRoleAndOutlet = () => {
+    const stateRole = location.state?.role;
+    const stateOutlet = location.state?.outlet;
+    
+    if (stateRole && stateOutlet) {
+      // Save to localStorage for persistence across redirects
+      localStorage.setItem('onboarding_role', stateRole);
+      localStorage.setItem('onboarding_outlet', stateOutlet);
+      return { role: stateRole, outlet: stateOutlet };
+    }
+    
+    // Try to restore from localStorage
+    return {
+      role: localStorage.getItem('onboarding_role'),
+      outlet: localStorage.getItem('onboarding_outlet')
+    };
+  };
+  
+  const { role, outlet } = getRoleAndOutlet();
 
-  const [currentStep, setCurrentStep] = useState(1);
+  // If returning from Digilocker, start with loading state
+  const [isDigilockerLoading, setIsDigilockerLoading] = useState<boolean>(isDigilockerReturn);
+  const [currentStep, setCurrentStep] = useState(isDigilockerReturn ? 6 : 1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [onboardingId, setOnboardingId] = useState<string | null>(null);
   const [outletDetails, setOutletDetails] = useState<any>(null);
@@ -132,12 +160,14 @@ const Onboarding = () => {
     lowerSize: "",
     aadhaarNumber: "",
     panNumber: "",
+    idType: "aadhaar",
     idDocuments: null,
     dateOfJoining: "",
     covidVaccinated: false,
 
     // Step 6: Verification
     aadhaarVerified: false,
+    panVerified: false,
     panDocument: null,
 
     // Employment Details (for final submission)
@@ -161,6 +191,14 @@ const Onboarding = () => {
   const [emailOtpTimer, setEmailOtpTimer] = useState(0);
   const [emailOtpLoading, setEmailOtpLoading] = useState(false);
 
+  // Verification state for Aadhaar and PAN
+  const [aadhaarTransactionId, setAadhaarTransactionId] = useState<string>("");
+  const [aadhaarEsignUrl, setAadhaarEsignUrl] = useState<string>("");
+  const [aadhaarVerificationLoading, setAadhaarVerificationLoading] = useState(false);
+  const [aadhaarStatusChecking, setAadhaarStatusChecking] = useState(false);
+  
+  const [panVerifying, setPanVerifying] = useState(false);
+
   // OTP timer countdown
   useEffect(() => {
     if (phoneOtpTimer > 0) {
@@ -175,6 +213,186 @@ const Onboarding = () => {
       return () => clearTimeout(timer);
     }
   }, [emailOtpTimer]);
+
+  // Check for Digilocker completion on page load
+  useEffect(() => {
+    const handleDigilockerReturn = async () => {
+      // Parse URL parameters from Surepass redirect
+      const urlParams = new URLSearchParams(window.location.search);
+      const clientId = urlParams.get('client_id');
+      const status = urlParams.get('status');
+      const type = urlParams.get('type');
+      
+      // Check if this is a Digilocker return
+      if (type === 'digilocker' && clientId) {
+        console.log('🔄 Detected return from Digilocker');
+        console.log('📝 Client ID:', clientId);
+        console.log('📝 Status:', status);
+        
+        // Clean URL immediately
+        window.history.replaceState({}, '', window.location.pathname);
+        
+        // Get saved data
+        const savedPhone = localStorage.getItem("onboarding_phone");
+        const savedOnboardingId = localStorage.getItem("onboarding_id");
+        
+        if (!savedPhone) {
+          console.error('❌ No saved phone found');
+          toast.error("Session expired. Please start over.");
+          return;
+        }
+        
+        console.log('📞 Saved phone:', savedPhone);
+        console.log('📋 Saved onboarding ID:', savedOnboardingId);
+        
+        // Show loading state
+        if (status === 'success') {
+          toast.info("Verifying your Aadhaar with Digilocker...");
+        } else {
+          toast.warning("Digilocker verification was not completed. Please try again.");
+        }
+        
+        try {
+          // Step 1: Verify with backend (backend will check with Surepass and update database)
+          console.log('📡 Calling backend to verify Digilocker status...');
+          const verificationResponse = await apiService.checkAadhaarVerificationStatus(
+            clientId,
+            savedOnboardingId,
+            status // Pass the status from URL
+          );
+          
+          console.log('📊 Verification response:', verificationResponse);
+          
+          // Step 2: Load the updated draft from database
+          console.log('📥 Loading draft from database...');
+          const draftResponse = await apiService.getDraft(savedPhone);
+          
+          if (!draftResponse.success || !draftResponse.onboarding) {
+            throw new Error('Failed to load onboarding data');
+          }
+          
+          const draft = draftResponse.onboarding;
+          console.log('✅ Draft loaded:', {
+            id: draft._id,
+            name: draft.fullName,
+            aadhaarVerified: draft.aadhaarVerified
+          });
+          
+          // Step 3: Update form state with all draft data
+          setFormData(prev => ({
+            ...prev,
+            fullName: draft.fullName || "",
+            dob: draft.dob ? new Date(draft.dob).toISOString().split('T')[0] : "",
+            gender: draft.gender || "",
+            phone: draft.phone || "",
+            phoneOtpVerified: draft.phoneOtpVerified || false,
+            phone2: draft.phone2 || "",
+            email: draft.email || "",
+            emailOtpVerified: draft.emailOtpVerified || false,
+            currentAddress: draft.currentAddress || "",
+            permanentAddress: draft.permanentAddress || "",
+            sameAsCurrentAddress: draft.sameAsCurrentAddress || false,
+            qualification: draft.qualification || "",
+            specialization: draft.specialization || "",
+            educationStatus: draft.educationStatus || "",
+            totalExperience: draft.totalExperience || "",
+            lastDesignation: draft.lastDesignation || "",
+            maritalStatus: draft.maritalStatus || "",
+            bloodGroup: draft.bloodGroup || "",
+            tshirtSize: draft.tshirtSize || "",
+            lowerSize: draft.lowerSize || "",
+            aadhaarNumber: draft.aadhaarNumber || "",
+            panNumber: draft.panNumber || "",
+            idType: draft.idType || "",
+            dateOfJoining: draft.dateOfJoining ? new Date(draft.dateOfJoining).toISOString().split('T')[0] : "",
+            covidVaccinated: draft.covidVaccinated || false,
+            aadhaarVerified: draft.aadhaarVerified || false,
+            panVerified: draft.panVerified || false,
+            hepatitisVaccinated: draft.hepatitisVaccinated || false,
+            typhoidVaccinated: draft.typhoidVaccinated || false,
+            designation: draft.designation || "",
+            fieldCoach: draft.fieldCoach || "",
+            department: draft.department || "",
+            storeName: draft.storeName || "",
+          }));
+          
+          setOnboardingId(draft._id);
+          
+          // Step 4: Navigate to Step 6 (Verification)
+          setCurrentStep(6);
+          setIsDigilockerLoading(false);
+          console.log('✅ Navigated to Step 6');
+          
+          // Step 5: Show verification result
+          if (draft.aadhaarVerified) {
+            toast.success("✅ Your Aadhaar has been verified successfully via Digilocker!");
+            localStorage.removeItem('digilocker_client_id');
+          } else if (status === 'success') {
+            toast.info("Verification completed. Your Aadhaar is now verified!");
+          } else {
+            toast.warning("Verification not completed. Please try again.");
+          }
+          
+        } catch (error: any) {
+          console.error('❌ Error handling Digilocker return:', error);
+          toast.error(error.message || "Failed to verify Aadhaar. Please try again.");
+          
+          // Still try to load the draft and go to step 6
+          try {
+            const savedPhone = localStorage.getItem("onboarding_phone");
+            if (savedPhone) {
+              const draftResponse = await apiService.getDraft(savedPhone);
+              if (draftResponse.success && draftResponse.onboarding) {
+                const draft = draftResponse.onboarding;
+                setFormData(prev => ({
+                  ...prev,
+                  fullName: draft.fullName || "",
+                  dob: draft.dob ? new Date(draft.dob).toISOString().split('T')[0] : "",
+                  gender: draft.gender || "",
+                  phone: draft.phone || "",
+                  phoneOtpVerified: draft.phoneOtpVerified || false,
+                  phone2: draft.phone2 || "",
+                  email: draft.email || "",
+                  emailOtpVerified: draft.emailOtpVerified || false,
+                  currentAddress: draft.currentAddress || "",
+                  permanentAddress: draft.permanentAddress || "",
+                  sameAsCurrentAddress: draft.sameAsCurrentAddress || false,
+                  qualification: draft.qualification || "",
+                  specialization: draft.specialization || "",
+                  educationStatus: draft.educationStatus || "",
+                  totalExperience: draft.totalExperience || "",
+                  lastDesignation: draft.lastDesignation || "",
+                  maritalStatus: draft.maritalStatus || "",
+                  bloodGroup: draft.bloodGroup || "",
+                  tshirtSize: draft.tshirtSize || "",
+                  lowerSize: draft.lowerSize || "",
+                  aadhaarNumber: draft.aadhaarNumber || "",
+                  panNumber: draft.panNumber || "",
+                  idType: draft.idType || "",
+                  dateOfJoining: draft.dateOfJoining ? new Date(draft.dateOfJoining).toISOString().split('T')[0] : "",
+                  covidVaccinated: draft.covidVaccinated || false,
+                  aadhaarVerified: draft.aadhaarVerified || false,
+                  panVerified: draft.panVerified || false,
+                }));
+                setOnboardingId(draft._id);
+                setCurrentStep(6);
+              }
+            }
+          } catch (loadError) {
+            console.error('❌ Failed to load draft:', loadError);
+          }
+        } finally {
+          // Always set loading to false when done
+          setIsDigilockerLoading(false);
+        }
+      } else {
+        // Not returning from Digilocker, set loading to false
+        setIsDigilockerLoading(false);
+      }
+    };
+    
+    handleDigilockerReturn();
+  }, []); // Run only once on mount
 
   // Fetch outlet details and field coach
   useEffect(() => {
@@ -205,28 +423,85 @@ const Onboarding = () => {
     fetchOutletDetails();
   }, [outlet]);
 
-  // Load existing draft from backend if available
+  // Load existing draft from backend if available (only on fresh page load, not Digilocker return)
   useEffect(() => {
     const loadDraft = async () => {
+      // Skip if returning from Digilocker (check URL first since it's more reliable)
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('type') === 'digilocker' || urlParams.get('client_id')) {
+        console.log('⏭️ Skipping general draft load - returning from Digilocker');
+        return;
+      }
+      
       const savedPhone = localStorage.getItem("onboarding_phone");
       if (savedPhone) {
         try {
           const response = await apiService.getDraft(savedPhone);
           if (response.success && response.onboarding) {
             const draft = response.onboarding;
+            
+            // Map all draft fields to formData
             setFormData(prev => ({
               ...prev,
+              // Step 1
               fullName: draft.fullName || "",
-              phone: draft.phone || "",
-              email: draft.email || "",
               dob: draft.dob ? new Date(draft.dob).toISOString().split('T')[0] : "",
-              address: draft.address || "",
-              emergencyContact: draft.emergencyContact || "",
-              emergencyPhone: draft.emergencyPhone || "",
+              gender: draft.gender || "",
+              
+              // Step 2
+              phone: draft.phone || "",
+              phoneOtpVerified: draft.phoneOtpVerified || false,
+              phone2: draft.phone2 || "",
+              email: draft.email || "",
+              emailOtpVerified: draft.emailOtpVerified || false,
+              currentAddress: draft.currentAddress || "",
+              permanentAddress: draft.permanentAddress || "",
+              sameAsCurrentAddress: draft.sameAsCurrentAddress || false,
+              
+              // Step 3
+              qualification: draft.qualification || "",
+              specialization: draft.specialization || "",
+              educationStatus: draft.educationStatus || "",
+              
+              // Step 4
+              totalExperience: draft.totalExperience || "",
+              lastDesignation: draft.lastDesignation || "",
+              
+              // Step 5
+              maritalStatus: draft.maritalStatus || "",
+              bloodGroup: draft.bloodGroup || "",
+              tshirtSize: draft.tshirtSize || "",
+              lowerSize: draft.lowerSize || "",
+              aadhaarNumber: draft.aadhaarNumber || "",
+              panNumber: draft.panNumber || "",
+              idType: draft.idType || "",
+              dateOfJoining: draft.dateOfJoining ? new Date(draft.dateOfJoining).toISOString().split('T')[0] : "",
+              covidVaccinated: draft.covidVaccinated || false,
+              
+              // Step 6
               aadhaarVerified: draft.aadhaarVerified || false,
+              panVerified: draft.panVerified || false,
+              
+              // Employment
+              hepatitisVaccinated: draft.hepatitisVaccinated || false,
+              typhoidVaccinated: draft.typhoidVaccinated || false,
+              designation: draft.designation || "",
+              fieldCoach: draft.fieldCoach || "",
+              department: draft.department || "",
+              storeName: draft.storeName || "",
             }));
+            
+            // Restore transaction ID if exists in database
+            if (draft.aadhaarTransactionId) {
+              setAadhaarTransactionId(draft.aadhaarTransactionId);
+              console.log('📦 Restored transaction ID from database:', draft.aadhaarTransactionId);
+            }
+            
+            // Restore to saved step from database
             setCurrentStep(draft.currentStep || 1);
             setOnboardingId(draft._id);
+            
+            console.log('✅ Draft loaded successfully, current step:', draft.currentStep);
           }
         } catch (error) {
           console.log("No existing draft found");
@@ -335,13 +610,197 @@ const Onboarding = () => {
     }
   };
 
+  // PAN Verification handler
+  const handleVerifyPAN = async () => {
+    if (!formData.panNumber || formData.panNumber.length !== 10) {
+      toast.error("Please enter a valid 10-character PAN number");
+      return;
+    }
+
+    setPanVerifying(true);
+    try {
+      const response = await apiService.verifyPAN(
+        formData.panNumber,
+        formData.fullName,
+        formData.dob,
+        onboardingId || undefined
+      );
+      
+      if (response.success && response.verified) {
+        updateField("panVerified", true);
+        toast.success("PAN verified successfully!");
+      } else {
+        toast.error(response.message || "PAN verification failed");
+      }
+    } catch (error: any) {
+      toast.error(error.message || "PAN verification failed");
+    } finally {
+      setPanVerifying(false);
+    }
+  };
+
+  // Aadhaar Verification handlers (Digilocker via Surepass)
+  const handleInitiateAadhaarVerification = async () => {
+    // Validation
+    if (!formData.fullName || formData.fullName.trim().length < 2) {
+      toast.error("Please enter your full name in Step 1");
+      return;
+    }
+
+    console.log('🔍 Initiating Digilocker verification');
+
+    setAadhaarVerificationLoading(true);
+    try {
+      // Use production URL for redirect
+      const redirectUrl = window.location.hostname === 'localhost' 
+        ? 'https://burgersingfrontend.kamaaupoot.in/onboarding'
+        : window.location.origin + '/onboarding';
+
+      console.log('🔗 Using redirect URL:', redirectUrl);
+      
+      const response = await apiService.initiateAadhaarVerification(
+        redirectUrl,
+        onboardingId
+      );
+
+      console.log('✅ Digilocker response:', response);
+      
+      if (response.success && response.digilockerUrl) {
+        console.log('📝 Storing client ID:', response.clientId);
+        toast.success(response.message || "Digilocker Link initiated. Redirecting to verification portal...");
+        
+        // Store client_id for later status check
+        if (response.clientId) {
+          localStorage.setItem('digilocker_client_id', response.clientId);
+          console.log('💾 Stored client_id in localStorage:', response.clientId);
+        }
+        
+        // Also store onboarding_id for restoration after redirect
+        if (onboardingId) {
+          localStorage.setItem('onboarding_id', onboardingId);
+          console.log('💾 Stored onboarding_id in localStorage:', onboardingId);
+        }
+        
+        // Make sure phone is saved for draft restoration
+        if (formData.phone) {
+          localStorage.setItem('onboarding_phone', formData.phone);
+          console.log('💾 Stored phone in localStorage:', formData.phone);
+        }
+        
+        // Save current step so we can restore to step 6 after redirect
+        localStorage.setItem('onboarding_step', '6');
+        
+        // Redirect to Surepass Digilocker portal
+        setTimeout(() => {
+          window.location.href = response.digilockerUrl;
+        }, 1500);
+      } else {
+        console.error('❌ Digilocker initiation failed:', response);
+        toast.error(response.message || "Failed to initiate Aadhaar verification via Digilocker");
+      }
+    } catch (error: any) {
+      console.error('❌ Digilocker error:', error);
+      toast.error(error.message || "Failed to initiate Aadhaar verification");
+    } finally {
+      setAadhaarVerificationLoading(false);
+    }
+  };
+
+  const handleCheckAadhaarStatus = async () => {
+    if (!onboardingId) {
+      toast.error("No onboarding record found. Please complete previous steps first.");
+      return;
+    }
+
+    console.log('🔍 Checking status from database...');
+    console.log('📋 Onboarding ID:', onboardingId);
+
+    setAadhaarStatusChecking(true);
+    try {
+      const clientId = localStorage.getItem('digilocker_client_id') || undefined;
+      
+      const response = await apiService.checkAadhaarVerificationStatus(
+        clientId,
+        onboardingId
+      );
+      
+      console.log('📊 Status response:', response);
+      
+      if (response.success && response.verified) {
+        updateField("aadhaarVerified", true);
+        localStorage.removeItem('digilocker_client_id');
+        toast.success("Aadhaar verified successfully via Digilocker!");
+        
+        // Save the verification status to backend immediately
+        try {
+          await apiService.saveDraft({
+            ...formData,
+            aadhaarVerified: true,
+            phone: formData.phone
+          });
+          console.log('✅ Verification status saved to backend');
+        } catch (saveError) {
+          console.error('Failed to save verification status:', saveError);
+          toast.warning("Verification successful but failed to save. Please proceed to next step.");
+        }
+      } else if (response.success && !response.verified) {
+        toast.info(response.message || "Digilocker verification is still pending. Please complete the verification process.");
+      } else {
+        const errorMsg = response.message || "Aadhaar verification status check failed";
+        if (errorMsg.includes('expired') || errorMsg.includes('not found')) {
+          toast.error("Digilocker session expired or not found. Please initiate verification again.");
+          localStorage.removeItem('digilocker_client_id');
+        } else {
+          toast.error(errorMsg);
+        }
+      }
+    } catch (error: any) {
+      console.error('❌ Status check error:', error);
+      console.error('📊 Error details:', {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status
+      });
+      const errorMsg = error.message || "Failed to check Aadhaar verification status";
+      const backendError = error.response?.data?.message || '';
+      const backendDebug = error.response?.data?.debug;
+      
+      console.log('🔍 Backend debug info:', backendDebug);
+      
+      if (errorMsg.includes('expired') || errorMsg.includes('not found') || backendError.includes('expired') || backendError.includes('not found') || errorMsg.includes('404')) {
+        toast.error("Digilocker session expired or not found. Please initiate verification again.");
+        localStorage.removeItem('digilocker_client_id');
+      } else {
+        toast.error(backendError || errorMsg);
+      }
+    } finally {
+      setAadhaarStatusChecking(false);
+    }
+  };
+
   const validateStep = (step: number): boolean => {
     const newErrors: Partial<Record<keyof FormData, string>> = {};
 
     if (step === 1) {
       // Basic Details
       if (!formData.fullName.trim()) newErrors.fullName = "Full name is required";
-      if (!formData.dob) newErrors.dob = "Date of birth is required";
+      if (!formData.dob) {
+        newErrors.dob = "Date of birth is required";
+      } else {
+        const dobDate = new Date(formData.dob);
+        const today = new Date();
+        const age = today.getFullYear() - dobDate.getFullYear() - 
+          (today.getMonth() < dobDate.getMonth() || 
+           (today.getMonth() === dobDate.getMonth() && today.getDate() < dobDate.getDate()) ? 1 : 0);
+        
+        if (dobDate > today) {
+          newErrors.dob = "Date of birth cannot be in the future";
+        } else if (age < 18) {
+          newErrors.dob = "You must be at least 18 years old";
+        } else if (age > 100) {
+          newErrors.dob = "Please enter a valid date of birth";
+        }
+      }
       if (!formData.gender) newErrors.gender = "Gender is required";
       if (!formData.photo) newErrors.photo = "Live photo is required";
     }
@@ -375,19 +834,29 @@ const Onboarding = () => {
       if (!formData.bloodGroup) newErrors.bloodGroup = "Blood group is required";
       if (!formData.tshirtSize) newErrors.tshirtSize = "T-shirt size is required";
       if (!formData.lowerSize) newErrors.lowerSize = "Lower size is required";
+      // Aadhaar is always required for Digilocker verification
       if (!formData.aadhaarNumber || formData.aadhaarNumber.length !== 12) {
         newErrors.aadhaarNumber = "Valid 12-digit Aadhaar number required";
       }
-      if (!formData.panNumber || formData.panNumber.length !== 10) {
-        newErrors.panNumber = "Valid 10-character PAN number required";
+      // PAN is optional - validate format only if provided
+      if (formData.panNumber && formData.panNumber.length > 0) {
+        if (formData.panNumber.length !== 10) {
+          newErrors.panNumber = "PAN number must be 10 characters";
+        } else {
+          const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/;
+          if (!panRegex.test(formData.panNumber)) {
+            newErrors.panNumber = "Invalid PAN format. Format: ABCDE1234F (5 letters, 4 digits, 1 letter)";
+          }
+        }
       }
       if (!formData.dateOfJoining) newErrors.dateOfJoining = "Date of joining is required";
     }
 
     if (step === 6) {
-      // Verification
-      if (!formData.aadhaarVerified) newErrors.aadhaarVerified = "Please verify your Aadhaar via DigiLocker";
-      if (!formData.panDocument) newErrors.panDocument = "PAN document is required";
+      // Aadhaar verification is required via Digilocker
+      if (!formData.aadhaarVerified) {
+        newErrors.aadhaarVerified = "Please verify your Aadhaar via Digilocker";
+      }
     }
 
     setErrors(newErrors);
@@ -439,9 +908,11 @@ const Onboarding = () => {
           lowerSize: formData.lowerSize,
           aadhaarNumber: formData.aadhaarNumber,
           panNumber: formData.panNumber,
+          idType: formData.idType,
           
           // Step 6: Verification
           aadhaarVerified: formData.aadhaarVerified,
+          panVerified: formData.panVerified,
           
           // Step 7: Employment Details
           covidVaccinated: formData.covidVaccinated,
@@ -481,6 +952,35 @@ const Onboarding = () => {
           console.log("Setting onboarding ID:", id);
           setOnboardingId(id);
           localStorage.setItem("onboarding_phone", formData.phone);
+          
+          // Upload documents immediately after Step 5 (before verification step)
+          // This ensures documents are saved even if user is redirected for Aadhaar verification
+          if (currentStep === 5) {
+            const hasDocuments = formData.photo || formData.educationCertificate || 
+                                formData.experienceDocument || formData.idDocuments || 
+                                formData.panDocument;
+            
+            if (hasDocuments) {
+              try {
+                console.log("📤 Uploading documents after Step 5...");
+                const uploadFormData = new FormData();
+                
+                if (formData.photo) uploadFormData.append('photo', formData.photo);
+                if (formData.educationCertificate) uploadFormData.append('educationCertificate', formData.educationCertificate);
+                if (formData.experienceDocument) uploadFormData.append('experienceDocument', formData.experienceDocument);
+                if (formData.idDocuments) uploadFormData.append('idDocuments', formData.idDocuments);
+                if (formData.panDocument) uploadFormData.append('panDocument', formData.panDocument);
+
+                await apiService.uploadDocuments(id, uploadFormData);
+                console.log("✅ Documents uploaded successfully");
+                toast.success("Documents uploaded successfully");
+              } catch (uploadError: any) {
+                console.error("❌ Failed to upload documents:", uploadError);
+                toast.error("Failed to upload documents: " + (uploadError.message || "Unknown error"));
+                // Don't prevent navigation - user can retry upload later
+              }
+            }
+          }
           
           // Move to next step only after successful save
           if (currentStep < STEPS.length) {
@@ -546,7 +1046,9 @@ const Onboarding = () => {
         lowerSize: formData.lowerSize,
         aadhaarNumber: formData.aadhaarNumber,
         panNumber: formData.panNumber,
+        idType: formData.idType,
         aadhaarVerified: formData.aadhaarVerified,
+        panVerified: formData.panVerified,
         covidVaccinated: formData.covidVaccinated,
         hepatitisVaccinated: formData.hepatitisVaccinated,
         typhoidVaccinated: formData.typhoidVaccinated,
@@ -563,24 +1065,9 @@ const Onboarding = () => {
       console.log("Saving final draft before submission, aadhaarVerified:", formData.aadhaarVerified);
       await apiService.saveDraft(draftData);
       
-      // Upload documents if not already uploaded
-      const hasDocuments = formData.photo || formData.educationCertificate || 
-                          formData.experienceDocument || formData.idDocuments || 
-                          formData.panDocument;
-      
-      if (hasDocuments) {
-        console.log("Uploading documents...");
-        const uploadFormData = new FormData();
-        
-        if (formData.photo) uploadFormData.append('photo', formData.photo);
-        if (formData.educationCertificate) uploadFormData.append('educationCertificate', formData.educationCertificate);
-        if (formData.experienceDocument) uploadFormData.append('experienceDocument', formData.experienceDocument);
-        if (formData.idDocuments) uploadFormData.append('idDocuments', formData.idDocuments);
-        if (formData.panDocument) uploadFormData.append('panDocument', formData.panDocument);
-
-        await apiService.uploadDocuments(onboardingId, uploadFormData);
-        console.log("Documents uploaded successfully");
-      }
+      // Documents are already uploaded on Step 5 (after user clicks Next on Step 5)
+      // This prevents document loss during Aadhaar redirect
+      console.log("📝 Documents were uploaded after Step 5");
 
       // Submit application
       console.log("Submitting application...");
@@ -589,6 +1076,9 @@ const Onboarding = () => {
       if (response.success) {
         // Clear draft data
         localStorage.removeItem("onboarding_phone");
+        localStorage.removeItem("onboarding_role");
+        localStorage.removeItem("onboarding_outlet");
+        localStorage.removeItem("aadhaar_transaction_id");
         
         toast.success("Application submitted successfully!");
         navigate("/", { state: { submitted: true } });
@@ -599,6 +1089,180 @@ const Onboarding = () => {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // PAN Verification Component
+  const PANVerificationComponent = ({ formData, updateField, errors }: any) => (
+    <div className="space-y-6">
+      <div className="p-6 border rounded-lg bg-card">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between pb-4 border-b">
+            <div>
+              <h4 className="font-semibold">PAN Details</h4>
+              <p className="text-sm text-muted-foreground mt-1">
+                PAN: {formData.panNumber}
+              </p>
+            </div>
+            {formData.panVerified && (
+              <div className="flex items-center gap-2 text-green-600">
+                <CheckCircle className="w-5 h-5" />
+                <span className="text-sm font-medium">Verified</span>
+              </div>
+            )}
+          </div>
+
+          {!formData.panVerified ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Click the button below to verify your PAN details with the Income Tax Department.
+              </p>
+              <Button
+                type="button"
+                onClick={handleVerifyPAN}
+                disabled={panVerifying}
+                className="w-full"
+              >
+                {panVerifying ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Verifying PAN...
+                  </>
+                ) : (
+                  "Verify PAN"
+                )}
+              </Button>
+            </div>
+          ) : (
+            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <p className="text-sm text-green-800 dark:text-green-200">
+                ✓ Your PAN has been successfully verified
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+      {errors.panVerified && (
+        <p className="text-center text-sm text-destructive">{errors.panVerified}</p>
+      )}
+    </div>
+  );
+
+  // Aadhaar Verification Component via Digilocker
+  const AadhaarVerificationComponent = ({ formData, updateField, errors }: any) => {
+    // Check if returning from Digilocker
+    const urlParams = new URLSearchParams(window.location.search);
+    const digilockerStatus = urlParams.get('status');
+    
+    return (
+      <div className="space-y-6">
+        <div className="p-6 border rounded-lg bg-card">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between pb-4 border-b">
+              <div>
+                <h4 className="font-semibold">Aadhaar Verification via Digilocker</h4>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Aadhaar: XXXX XXXX {formData.aadhaarNumber?.slice(-4) || '****'}
+                </p>
+              </div>
+              {formData.aadhaarVerified && (
+                <div className="flex items-center gap-2 text-green-600">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="text-sm font-medium">Verified</span>
+                </div>
+              )}
+            </div>
+
+            {!formData.aadhaarVerified ? (
+              <div className="space-y-4">
+                {/* Show validation warnings if data is missing */}
+                {(!formData.fullName || !formData.email || !formData.currentAddress) && (
+                  <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                    <h5 className="font-medium text-sm text-yellow-800 dark:text-yellow-200 mb-2">
+                      ⚠️ Missing Required Information
+                    </h5>
+                    <ul className="text-sm text-yellow-700 dark:text-yellow-300 space-y-1 list-disc list-inside">
+                      {!formData.fullName && <li>Full Name (from Step 1)</li>}
+                      {!formData.email && <li>Email Address (from Step 2)</li>}
+                      {!formData.currentAddress && <li>Current Address (from Step 2)</li>}
+                    </ul>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-2">
+                      Please go back and complete these fields before verifying with Digilocker.
+                    </p>
+                  </div>
+                )}
+
+                {digilockerStatus === 'success' && !formData.aadhaarVerified ? (
+                  <div className="space-y-4">
+                    <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                      <p className="text-sm text-blue-800 dark:text-blue-200">
+                        ℹ️ Digilocker verification in progress. Please wait...
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={handleCheckAadhaarStatus}
+                      disabled={aadhaarStatusChecking}
+                      className="w-full"
+                    >
+                      {aadhaarStatusChecking ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Checking Status...
+                        </>
+                      ) : (
+                        "Check Verification Status"
+                      )}
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="p-4 bg-muted/50 rounded-lg">
+                      <h5 className="font-medium text-sm mb-2">How it works:</h5>
+                      <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+                        <li>Click "Verify with Digilocker" button below</li>
+                        <li>You'll be redirected to Digilocker portal</li>
+                        <li>Login with your Aadhaar or mobile number</li>
+                        <li>Grant access to verify your Aadhaar</li>
+                        <li>Return here automatically after verification</li>
+                      </ol>
+                      <div className="mt-3 pt-3 border-t">
+                        <p className="text-xs text-muted-foreground">
+                          <strong>Important:</strong> Complete the verification on Digilocker portal. You will be redirected back automatically.
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={handleInitiateAadhaarVerification}
+                      disabled={aadhaarVerificationLoading}
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                    >
+                      {aadhaarVerificationLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Connecting to Digilocker...
+                        </>
+                      ) : (
+                        "Verify with Digilocker"
+                      )}
+                    </Button>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <p className="text-sm text-green-800 dark:text-green-200">
+                  ✓ Your Aadhaar has been successfully verified via Digilocker
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+        {errors.aadhaarVerified && (
+          <p className="text-center text-sm text-destructive">{errors.aadhaarVerified}</p>
+        )}
+      </div>
+    );
   };
 
   const renderStep = () => {
@@ -632,6 +1296,7 @@ const Onboarding = () => {
                 type="date"
                 value={formData.dob}
                 onChange={(e) => updateField("dob", e.target.value)}
+                max={new Date().toISOString().split('T')[0]}
                 className={errors.dob ? "border-destructive" : ""}
               />
               {errors.dob && <p className="mt-1 text-xs text-destructive">{errors.dob}</p>}
@@ -1019,6 +1684,7 @@ const Onboarding = () => {
                   type="date"
                   value={formData.dateOfJoining}
                   onChange={(e) => updateField("dateOfJoining", e.target.value)}
+                  min={new Date().toISOString().split('T')[0]}
                   className={errors.dateOfJoining ? "border-destructive" : ""}
                 />
                 {errors.dateOfJoining && <p className="mt-1 text-xs text-destructive">{errors.dateOfJoining}</p>}
@@ -1093,7 +1759,7 @@ const Onboarding = () => {
             </div>
 
             <div>
-              <Label htmlFor="panNumber" className="mb-2 block">PAN Number *</Label>
+              <Label htmlFor="panNumber" className="mb-2 block">PAN Number (Optional)</Label>
               <Input
                 id="panNumber"
                 value={formData.panNumber}
@@ -1106,7 +1772,7 @@ const Onboarding = () => {
             </div>
 
             <FileUploader
-              label="ID Attachments (Aadhaar)"
+              label="ID Attachment (Aadhaar)"
               accept="image/*,.pdf"
               maxSize={5}
               value={formData.idDocuments}
@@ -1118,7 +1784,7 @@ const Onboarding = () => {
         );
 
       case 6:
-        // Step 6: Verification
+        // Step 6: Aadhaar Verification via Digilocker
         return (
           <div className="space-y-6 animate-fade-in">
             <div className="text-center mb-8">
@@ -1126,58 +1792,18 @@ const Onboarding = () => {
                 <FileText className="w-8 h-8 text-primary" />
               </div>
               <h3 className="text-lg font-semibold text-foreground mb-2">
-                Verify Your Identity
+                Verify Your Aadhaar via Digilocker
               </h3>
               <p className="text-muted-foreground text-sm max-w-md mx-auto">
-                We use DigiLocker for secure Aadhaar verification. Your data is protected and never stored on our servers.
+                Verify your Aadhaar using Digilocker - India's secure digital document wallet
               </p>
             </div>
 
-            <DigiLockerButton
-              status={formData.aadhaarVerified ? "verified" : "idle"}
-              onVerify={async () => {
-                updateField("aadhaarVerified", true);
-                return true;
-              }}
+            <AadhaarVerificationComponent 
+              formData={formData}
+              updateField={updateField}
+              errors={errors}
             />
-
-            {!formData.aadhaarVerified && (
-              <div className="pt-4 border-t border-border">
-                {/* <div className="flex items-start gap-3 p-4 bg-muted/50 rounded-lg">
-                  <input
-                    type="checkbox"
-                    id="manualVerification"
-                    checked={formData.aadhaarVerified}
-                    onChange={(e) => updateField("aadhaarVerified", e.target.checked)}
-                    className="mt-1 rounded border-input"
-                  />
-                  <div className="flex-1">
-                    <Label htmlFor="manualVerification" className="text-sm font-medium cursor-pointer">
-                      I confirm that I have uploaded valid Aadhaar documents and the information provided is accurate
-                    </Label>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      By checking this box, you confirm that your Aadhaar details are correct and documents are authentic
-                    </p>
-                  </div>
-                </div> */}
-              </div>
-            )}
-
-            {errors.aadhaarVerified && (
-              <p className="text-center text-sm text-destructive">{errors.aadhaarVerified}</p>
-            )}
-
-            <div className="pt-6 border-t border-border">
-              <FileUploader
-                label="PAN Document *"
-                accept="image/*,.pdf"
-                maxSize={5}
-                value={formData.panDocument}
-                onFileSelect={(file) => updateField("panDocument", file)}
-                error={errors.panDocument}
-                hint="Upload clear copy of PAN card, max 5MB"
-              />
-            </div>
           </div>
         );
 
@@ -1185,6 +1811,19 @@ const Onboarding = () => {
         return null;
     }
   };
+
+  // Show loading screen while processing Digilocker return
+  if (isDigilockerLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-hero flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin mx-auto mb-4 text-primary" />
+          <h2 className="text-xl font-semibold mb-2">Verifying your Aadhaar...</h2>
+          <p className="text-muted-foreground">Please wait while we confirm your verification with Digilocker.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-hero">

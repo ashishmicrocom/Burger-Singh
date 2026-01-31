@@ -13,6 +13,10 @@ import {
   rejectWithToken,
   getPendingApprovals,
   checkApprovalToken,
+  verifyPANCard,
+  initiateAadhaarVerification,
+  completeAadhaarVerification,
+  handleAadhaarWebhook,
   upload
 } from '../controllers/onboardingController.js';
 import { protect, authorize } from '../middlewares/authMiddleware.js';
@@ -31,6 +35,12 @@ router.post('/:id/upload', upload.fields([
   { name: 'panDocument', maxCount: 1 }
 ]), uploadDocuments);
 router.post('/:id/submit', submitApplication);
+
+// Verification routes
+router.post('/verify-pan', verifyPANCard);
+router.post('/verify-aadhaar/initiate', initiateAadhaarVerification);
+router.post('/verify-aadhaar/webhook', handleAadhaarWebhook); // Zoop webhook
+router.post('/verify-aadhaar/status', completeAadhaarVerification); // Check e-sign status
 
 // Token-based approval/rejection (No auth required, token validates the request)
 router.get('/:id/approve-with-token', approveWithToken);

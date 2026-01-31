@@ -106,14 +106,52 @@ export const getApplications = async (req, res) => {
 
     const applications = await Onboarding.find(query)
       .populate('outlet', 'name code')
+      .populate('approvedBy', 'name email')
+      .populate('rejectedBy', 'name email')
+      .populate('deactivationApprovedBy', 'name email')
       .sort({ createdAt: -1 })
       .lean();
 
     console.log('   Found applications:', applications.length);
     applications.forEach(app => console.log('      -', app.fullName, '(' + app.status + ')'));
 
+    // Get current field coach info for each outlet
+    const outletsWithFieldCoach = await Outlet.find({ _id: { $in: outletIds } })
+      .populate('fieldCoach', 'name email')
+      .lean();
+    const outletFieldCoachMap = new Map(
+      outletsWithFieldCoach.map(o => [o._id.toString(), { name: o.fieldCoach?.name, email: o.fieldCoach?.email }])
+    );
+
     // Format applications for frontend
     const formattedApplications = applications.map(app => {
+      // Get current outlet field coach
+      const currentFieldCoach = outletFieldCoachMap.get(app.outlet._id.toString());
+      
+      // Prepare field coach action info - Include all historical field coach data
+      // Use populated user data as fallback if direct fields are null
+      const actionInfo = {
+        // Approval tracking - use approvedByFieldCoach if available, otherwise use populated approvedBy user
+        approvedBy: app.approvedByFieldCoach || (app.approvedBy?.name) || null,
+        approvedByEmail: app.approvedByFieldCoachEmail || (app.approvedBy?.email) || null,
+        approvalDate: app.approvalDate || app.approvedAt || null,
+        
+        // Rejection tracking - use rejectedByFieldCoach if available, otherwise use populated rejectedBy user
+        rejectedBy: app.rejectedByFieldCoach || (app.rejectedBy?.name) || null,
+        rejectedByEmail: app.rejectedByFieldCoachEmail || (app.rejectedBy?.email) || null,
+        rejectionDate: app.rejectionDate || app.rejectedAt || null,
+        rejectionReason: app.rejectionReason || null,
+        
+        // Deactivation tracking - use deactivationApprovedByFieldCoach if available, otherwise use populated user
+        deactivationApprovedBy: app.deactivationApprovedByFieldCoach || (app.deactivationApprovedBy?.name) || null,
+        deactivationApprovedByEmail: app.deactivationApprovedByFieldCoachEmail || (app.deactivationApprovedBy?.email) || null,
+        deactivationApprovedAt: app.deactivationApprovedAt || null,
+        
+        // Current field coach (for comparison)
+        currentFieldCoach: currentFieldCoach?.name || null,
+        currentFieldCoachEmail: currentFieldCoach?.email || null
+      };
+      
       // Show employeeStatus as primary status if deactivated or terminated
       let displayStatus = app.status === 'submitted' || app.status === 'pending_approval' ? 'pending' : app.status;
       if (app.employeeStatus === 'deactivated' || app.employeeStatus === 'terminated') {
@@ -180,6 +218,9 @@ export const getApplications = async (req, res) => {
       // Employment history (for re-applicants)
       previousEmployment: app.previousEmployment || [],
       hasEmploymentHistory: app.previousEmployment && app.previousEmployment.length > 0,
+      
+      // Field coach action tracking - includes all historical actions
+      ...actionInfo,
       
       // Legacy fields
       address: app.address,
@@ -304,9 +345,11 @@ export const approveApplication = async (req, res) => {
       });
     }
 
-    // Update status to approved
+    // Update status to approved and store field coach info
     application.status = 'approved';
     application.approvedBy = fieldCoachId;
+    application.approvedByFieldCoach = req.user.name;
+    application.approvedByFieldCoachEmail = req.user.email;
     application.approvalDate = new Date();
     await application.save();
 
@@ -398,9 +441,11 @@ export const rejectApplication = async (req, res) => {
       });
     }
 
-    // Update status to rejected
+    // Update status to rejected and store field coach info
     application.status = 'rejected';
     application.rejectedBy = fieldCoachId;
+    application.rejectedByFieldCoach = req.user.name;
+    application.rejectedByFieldCoachEmail = req.user.email;
     application.rejectionReason = reason;
     application.rejectionDate = new Date();
     await application.save();
@@ -467,6 +512,14 @@ export const getDeactivationRequests = async (req, res) => {
       .sort({ deactivationRequestedAt: -1 })
       .lean();
 
+    // Get current field coach info for each outlet
+    const outletsWithFieldCoach = await Outlet.find({ _id: { $in: outletIds } })
+      .populate('fieldCoach', 'name email')
+      .lean();
+    const outletFieldCoachMap = new Map(
+      outletsWithFieldCoach.map(o => [o._id.toString(), { name: o.fieldCoach?.name, email: o.fieldCoach?.email }])
+    );
+
     // Format the response
     const formattedRequests = deactivationRequests.map(req => ({
       id: req._id,
@@ -483,7 +536,15 @@ export const getDeactivationRequests = async (req, res) => {
       requestedAt: req.deactivationRequestedAt ? new Date(req.deactivationRequestedAt).toLocaleDateString('en-GB') : 'N/A',
       requestedBy: req.deactivationRequestedBy?.name || 'Store Manager',
       reason: req.deactivationReason || 'No reason provided',
-      status: 'pending' // Set to 'pending' for frontend filter
+      status: 'pending', // Set to 'pending' for frontend filter
+      // Field coach action tracking for approved/rejected onboarding
+      approvedBy: req.approvedByFieldCoach || null,
+      approvedByEmail: req.approvedByFieldCoachEmail || null,
+      rejectedBy: req.rejectedByFieldCoach || null,
+      rejectedByEmail: req.rejectedByFieldCoachEmail || null,
+      // Current field coach info
+      currentFieldCoach: outletFieldCoachMap.get(req.outlet._id.toString())?.name || null,
+      currentFieldCoachEmail: outletFieldCoachMap.get(req.outlet._id.toString())?.email || null
     }));
 
     res.status(200).json({
@@ -528,9 +589,11 @@ export const approveDeactivation = async (req, res) => {
       });
     }
 
-    // Update employee status to deactivated
+    // Update employee status to deactivated and store field coach info
     employee.employeeStatus = 'deactivated';
     employee.deactivationApprovedBy = fieldCoachId;
+    employee.deactivationApprovedByFieldCoach = req.user.name;
+    employee.deactivationApprovedByFieldCoachEmail = req.user.email;
     employee.deactivationApprovedAt = new Date();
 
     await employee.save();

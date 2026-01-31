@@ -98,15 +98,48 @@ const onboardingSchema = new mongoose.Schema({
     trim: true,
     uppercase: true
   },
+  idType: {
+    type: String,
+    enum: ['aadhaar', 'pan', ''],
+    default: ''
+  },
   
   // Step 6: Verification
   aadhaarVerified: {
     type: Boolean,
     default: false
   },
+  // Digilocker verification fields (Surepass)
+  digilockerClientId: {
+    type: String,
+    default: null,
+    index: true  // For quick lookup in webhook
+  },
+  digilockerClientRef: {
+    type: String,
+    default: null
+  },
+  // Legacy Zoop fields (keeping for backward compatibility)
+  aadhaarTaskId: {
+    type: String,
+    default: null,
+    index: true  // For quick lookup in webhook
+  },
+  aadhaarTransactionId: {
+    type: String,
+    default: null
+  },
+  aadhaarVerificationData: {
+    type: Object,
+    default: null
+  },
   panVerified: {
     type: Boolean,
     default: false
+  },
+  panVerificationData: {
+    type: Object,
+    default: null
   },
   
   // Step 7: Employment Details
@@ -145,11 +178,15 @@ const onboardingSchema = new mongoose.Schema({
   // Role & Outlet
   role: {
     type: String,
-    required: [true, 'Role is required']
+    required: function() {
+      return this.status === 'submitted' || this.status === 'pending_approval' || this.status === 'approved';
+    }
   },
   outlet: {
     type: mongoose.Schema.Types.ObjectId,
-    required: [true, 'Outlet is required'],
+    required: function() {
+      return this.status === 'submitted' || this.status === 'pending_approval' || this.status === 'approved';
+    },
     ref: 'Outlet'
   },
   
@@ -236,6 +273,12 @@ const onboardingSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   },
+  approvedByFieldCoach: {
+    type: String  // Store field coach name at time of approval
+  },
+  approvedByFieldCoachEmail: {
+    type: String  // Store field coach email at time of approval
+  },
   approvalDate: {
     type: Date
   },
@@ -251,6 +294,12 @@ const onboardingSchema = new mongoose.Schema({
   rejectedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  rejectedByFieldCoach: {
+    type: String  // Store field coach name at time of rejection
+  },
+  rejectedByFieldCoachEmail: {
+    type: String  // Store field coach email at time of rejection
   },
   rejectionDate: {
     type: Date
@@ -281,6 +330,12 @@ const onboardingSchema = new mongoose.Schema({
   deactivationApprovedBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
+  },
+  deactivationApprovedByFieldCoach: {
+    type: String  // Store field coach name at time of deactivation approval
+  },
+  deactivationApprovedByFieldCoachEmail: {
+    type: String  // Store field coach email at time of deactivation approval
   },
   deactivationApprovedAt: {
     type: Date

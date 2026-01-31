@@ -98,13 +98,41 @@ export const FileUploader = ({
 
   const startCamera = useCallback(async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: "user" } 
-      });
-      setStream(mediaStream);
-      setShowCamera(true);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+      let mediaStream: MediaStream | null = null;
+      
+      // Try with front camera and specific constraints
+      try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({ 
+          video: { 
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          } 
+        });
+      } catch (err) {
+        // Fallback 1: Try without resolution constraints
+        try {
+          mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "user" } 
+          });
+        } catch (err2) {
+          // Fallback 2: Try with just video: true (basic video)
+          mediaStream = await navigator.mediaDevices.getUserMedia({ 
+            video: true 
+          });
+        }
+      }
+      
+      if (mediaStream) {
+        setStream(mediaStream);
+        setShowCamera(true);
+        
+        // Wait a bit for video element to be ready
+        setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.srcObject = mediaStream;
+          }
+        }, 100);
       }
     } catch (error) {
       console.error("Error accessing camera:", error);
@@ -172,9 +200,8 @@ export const FileUploader = ({
           onDrop={handleDrop}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
-          onClick={() => inputRef.current?.click()}
           className={cn(
-            "border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all duration-200",
+            "border-2 border-dashed rounded-xl p-6 text-center transition-all duration-200",
             isDragging 
               ? "border-primary bg-primary/5" 
               : "border-border hover:border-primary/50 hover:bg-muted/50",
@@ -188,25 +215,32 @@ export const FileUploader = ({
             onChange={handleChange}
             className="hidden"
           />
-          <Upload className={cn(
-            "w-10 h-10 mx-auto mb-3 transition-colors",
-            isDragging ? "text-primary" : "text-muted-foreground"
-          )} />
-          <p className="text-sm text-foreground font-medium mb-1">
-            {isDragging ? "Drop your file here" : "Drag & drop or click to upload"}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {hint || `Max size: ${maxSize}MB`}
-          </p>
+          <div 
+            onClick={() => inputRef.current?.click()}
+            className="cursor-pointer"
+          >
+            <Upload className={cn(
+              "w-10 h-10 mx-auto mb-3 transition-colors",
+              isDragging ? "text-primary" : "text-muted-foreground"
+            )} />
+            <p className="text-sm text-foreground font-medium mb-1">
+              {isDragging ? "Drop your file here" : "Drag & drop or click to upload"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {hint || `Max size: ${maxSize}MB`}
+            </p>
+          </div>
           {enableCamera && (
             <Button 
               onClick={(e) => {
                 e.stopPropagation();
+                e.preventDefault();
                 startCamera();
               }}
               variant="outline"
               size="sm"
               className="mt-3"
+              type="button"
             >
               <Camera className="w-4 h-4 mr-2" />
               Open Camera

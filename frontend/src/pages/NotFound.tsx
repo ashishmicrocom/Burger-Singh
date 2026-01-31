@@ -23,7 +23,7 @@ const NotFound = () => {
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="text-center max-w-md">
           <div className="flex items-center justify-center">
-            <img src="public/burgersingh-logo.png" className="h-14 w-14" alt="" />
+            <img src="/burgersingh-logo.png" className="h-14 w-14" alt="" />
           </div>
           <h1 className="text-6xl font-bold text-primary mb-4">404</h1>
           <h2 className="text-xl font-semibold text-foreground mb-2">

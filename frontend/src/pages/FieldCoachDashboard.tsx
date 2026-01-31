@@ -50,6 +50,19 @@ interface Application {
   dateOfBirth: string;
   qualification: string;
   
+  // Field coach action tracking
+  approvedBy?: string;
+  approvedByEmail?: string;
+  approvalDate?: string;
+  rejectedBy?: string;
+  rejectedByEmail?: string;
+  rejectionDate?: string;
+  deactivationApprovedBy?: string;
+  deactivationApprovedByEmail?: string;
+  deactivationApprovedAt?: string;
+  currentFieldCoach?: string;
+  currentFieldCoachEmail?: string;
+  
   // Additional fields from 7-step form
   gender?: string;
   phone2?: string;
@@ -108,6 +121,14 @@ interface DeactivationRequest {
   requestedAt: string;
   reason: string;
   status: DeactivationStatus;
+  
+  // Field coach action tracking
+  approvedBy?: string;
+  approvedByEmail?: string;
+  rejectedBy?: string;
+  rejectedByEmail?: string;
+  currentFieldCoach?: string;
+  currentFieldCoachEmail?: string;
 }
 
 const FieldCoachDashboard = () => {
@@ -158,6 +179,13 @@ const FieldCoachDashboard = () => {
         apiService.getFieldCoachApplications({ status: filter, search }),
         apiService.getFieldCoachDeactivations()
       ]);
+      
+      // Debug: Log the first application to see field coach data
+      if (applicationsRes.applications.length > 0) {
+        console.log('Sample application data:', applicationsRes.applications[0]);
+        console.log('Current Field Coach:', applicationsRes.applications[0].currentFieldCoach);
+        console.log('Approved By:', applicationsRes.applications[0].approvedBy);
+      }
       
       setStats(statsRes.stats);
       setApplications(applicationsRes.applications);
@@ -276,7 +304,7 @@ const FieldCoachDashboard = () => {
       <header className="sticky top-0 z-40 glass border-b">
         <div className="container mx-auto px-4 h-16 flex items-center gap-4">
           <div className="flex items-center justify-center">
-              <img src="public/burgersingh-logo.png" className="h-14 w-14" alt="" />
+              <img src="/burgersingh-logo.png" className="h-14 w-14" alt="" />
             </div>
           <div className="flex-1">
             <h1 className="font-semibold text-foreground">{t("dashboard.fieldCoachDashboard")}</h1>
@@ -476,6 +504,19 @@ const FieldCoachDashboard = () => {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="bg-popover border shadow-lg">
                         <DropdownMenuItem onClick={() => {
+                          console.log('=== Selected Application Debug ===');
+                          console.log('Full app data:', app);
+                          console.log('Status:', app.status);
+                          console.log('Current FC:', app.currentFieldCoach);
+                          console.log('Current FC Email:', app.currentFieldCoachEmail);
+                          console.log('Approved By:', app.approvedBy);
+                          console.log('Approved By Email:', app.approvedByEmail);
+                          console.log('Approval Date:', app.approvalDate);
+                          console.log('Rejected By:', app.rejectedBy);
+                          console.log('Rejected By Email:', app.rejectedByEmail);
+                          console.log('Rejection Date:', app.rejectionDate);
+                          console.log('Deactivation Approved By:', app.deactivationApprovedBy);
+                          console.log('===================================');
                           setSelectedApp(app);
                           setShowDetailModal(true);
                         }}>
@@ -525,6 +566,36 @@ const FieldCoachDashboard = () => {
                           <p><span className="font-medium">{t("dashboard.requestedBy")}:</span> {deactivation.requestedBy}</p>
                           <p><span className="font-medium">{t("dashboard.date")}:</span> {deactivation.requestedAt}</p>
                         </div>
+                        
+                        {/* Field Coach Action History */}
+                        {(deactivation.approvedBy || deactivation.rejectedBy) && (
+                          <div className="p-2 bg-blue-50 dark:bg-blue-950 rounded-lg text-xs mb-2 border border-blue-200 dark:border-blue-800">
+                            <p className="font-medium text-blue-700 dark:text-blue-300 mb-1">
+                              Original Approval History:
+                            </p>
+                            {deactivation.currentFieldCoach && (
+                              <p className="text-green-600 dark:text-green-400 mb-1">
+                                📌 Current Field Coach: <span className="font-medium">{deactivation.currentFieldCoach}</span> ({deactivation.currentFieldCoachEmail})
+                              </p>
+                            )}
+                            {deactivation.approvedBy && (
+                              <p className="text-blue-600 dark:text-blue-400">
+                                ✓ Approved by: <span className="font-medium">{deactivation.approvedBy}</span> ({deactivation.approvedByEmail})
+                                {deactivation.currentFieldCoach && deactivation.approvedBy !== deactivation.currentFieldCoach && (
+                                  <span className="ml-1 text-amber-600 dark:text-amber-400">(Previous FC)</span>
+                                )}
+                              </p>
+                            )}
+                            {deactivation.rejectedBy && (
+                              <p className="text-blue-600 dark:text-blue-400">
+                                ✗ Rejected by: <span className="font-medium">{deactivation.rejectedBy}</span> ({deactivation.rejectedByEmail})
+                                {deactivation.currentFieldCoach && deactivation.rejectedBy !== deactivation.currentFieldCoach && (
+                                  <span className="ml-1 text-amber-600 dark:text-amber-400">(Previous FC)</span>
+                                )}
+                              </p>
+                            )}
+                          </div>
+                        )}
                         
                         <div className="p-3 bg-muted/50 rounded-lg text-sm">
                           <p className="font-medium text-foreground mb-1">{t("dashboard.reason")}:</p>
@@ -728,6 +799,130 @@ const FieldCoachDashboard = () => {
                 </div>
               </div>
 
+              {/* Field Coach Action History - Always show this section */}
+              <div className="space-y-3 p-4 border rounded-lg bg-blue-50 dark:bg-blue-950">
+                <h4 className="font-semibold text-foreground flex items-center gap-2">
+                  <Briefcase className="w-4 h-4" />
+                  Field Coach Information
+                </h4>
+                
+                {/* Current Field Coach */}
+                {selectedApp.currentFieldCoach ? (
+                    <div className="p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg">
+                      <p className="text-sm font-medium text-green-700 dark:text-green-300 mb-2">Current Field Coach:</p>
+                      <div className="grid md:grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Name:</span>{" "}
+                          <span className="font-medium text-green-700 dark:text-green-400">{selectedApp.currentFieldCoach}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Email:</span>{" "}
+                          <span className="font-medium">{selectedApp.currentFieldCoachEmail}</span>
+                        </div>
+                      </div>
+                    </div>
+                ) : (
+                  <div className="p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Current field coach information not available</p>
+                  </div>
+                )}
+                
+                {/* Action History - Always show for approved/rejected applications */}
+                {(selectedApp.status === 'approved' || selectedApp.status === 'rejected' || selectedApp.approvedBy || selectedApp.rejectedBy || selectedApp.deactivationApprovedBy) && (
+                  <>
+                    {/* Check if field coach changed */}
+                    {((selectedApp.approvedBy && selectedApp.currentFieldCoach && selectedApp.approvedBy !== selectedApp.currentFieldCoach) ||
+                        (selectedApp.rejectedBy && selectedApp.currentFieldCoach && selectedApp.rejectedBy !== selectedApp.currentFieldCoach) ||
+                        (selectedApp.deactivationApprovedBy && selectedApp.currentFieldCoach && selectedApp.deactivationApprovedBy !== selectedApp.currentFieldCoach)) && (
+                        <div className="flex items-start gap-2 p-2 bg-amber-100 dark:bg-amber-900 rounded border border-amber-300 dark:border-amber-700">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                          <p className="text-xs text-amber-800 dark:text-amber-200">
+                            <strong>Field Coach Changed:</strong> The actions below were performed by the previous field coach assigned to this outlet.
+                          </p>
+                        </div>
+                      )}
+                      
+                      <div className="grid md:grid-cols-2 gap-3 text-sm border-t pt-3">
+                        <div className="md:col-span-2">
+                          <p className="font-medium text-muted-foreground mb-2">Action History:</p>
+                        </div>
+                        {selectedApp.approvedBy && (
+                          <>
+                            <div className="md:col-span-2">
+                              <span className="text-muted-foreground">Approved By:</span>{" "}
+                              <span className="font-medium text-green-700 dark:text-green-400">{selectedApp.approvedBy}</span>
+                              {selectedApp.currentFieldCoach && selectedApp.approvedBy !== selectedApp.currentFieldCoach && (
+                                <span className="ml-2 text-xs text-amber-600 dark:text-amber-400 font-semibold">(Previous Field Coach)</span>
+                              )}
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Email:</span>{" "}
+                              <span className="font-medium">{selectedApp.approvedByEmail}</span>
+                            </div>
+                            {selectedApp.approvalDate && (
+                              <div>
+                                <span className="text-muted-foreground">Approval Date:</span>{" "}
+                                <span className="font-medium">{new Date(selectedApp.approvalDate).toLocaleDateString('en-GB')}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {selectedApp.rejectedBy && (
+                          <>
+                            <div className="md:col-span-2">
+                              <span className="text-muted-foreground">Rejected By:</span>{" "}
+                              <span className="font-medium text-red-700 dark:text-red-400">{selectedApp.rejectedBy}</span>
+                              {selectedApp.currentFieldCoach && selectedApp.rejectedBy !== selectedApp.currentFieldCoach && (
+                                <span className="ml-2 text-xs text-amber-600 dark:text-amber-400 font-semibold">(Previous Field Coach)</span>
+                              )}
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Email:</span>{" "}
+                              <span className="font-medium">{selectedApp.rejectedByEmail}</span>
+                            </div>
+                            {selectedApp.rejectionDate && (
+                              <div>
+                                <span className="text-muted-foreground">Rejection Date:</span>{" "}
+                                <span className="font-medium">{new Date(selectedApp.rejectionDate).toLocaleDateString('en-GB')}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {selectedApp.deactivationApprovedBy && (
+                          <>
+                            <div className="md:col-span-2">
+                              <span className="text-muted-foreground">Deactivation Approved By:</span>{" "}
+                              <span className="font-medium text-orange-700 dark:text-orange-400">{selectedApp.deactivationApprovedBy}</span>
+                              {selectedApp.currentFieldCoach && selectedApp.deactivationApprovedBy !== selectedApp.currentFieldCoach && (
+                                <span className="ml-2 text-xs text-amber-600 dark:text-amber-400 font-semibold">(Previous Field Coach)</span>
+                              )}
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Email:</span>{" "}
+                              <span className="font-medium">{selectedApp.deactivationApprovedByEmail}</span>
+                            </div>
+                            {selectedApp.deactivationApprovedAt && (
+                              <div>
+                                <span className="text-muted-foreground">Deactivation Date:</span>{" "}
+                                <span className="font-medium">{new Date(selectedApp.deactivationApprovedAt).toLocaleDateString('en-GB')}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                        
+                        {/* Show message if no actions recorded yet */}
+                        {!selectedApp.approvedBy && !selectedApp.rejectedBy && !selectedApp.deactivationApprovedBy && (
+                          <div className="md:col-span-2">
+                            <div className="p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg">
+                              <p className="text-sm text-muted-foreground">No field coach actions recorded yet for this application</p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+              </div>
+
               {/* ID Details */}
               <div className="space-y-3 p-4 border rounded-lg">
                 <h4 className="font-semibold text-foreground">{t("dashboard.idVerification")}</h4>
@@ -857,7 +1052,7 @@ const FieldCoachDashboard = () => {
                   cleanPath = `onboarding/${cleanPath}`;
                 }
                 
-                const photoUrl = `http://localhost:5000/uploads/${cleanPath}`;
+                const photoUrl = `https://burgersingfrontbackend.kamaaupoot.in/uploads/${cleanPath}`;
                 
                 return (
                   <div className="p-4 border rounded-lg space-y-3">

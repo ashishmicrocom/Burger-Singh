@@ -204,6 +204,18 @@ export const getAllEmployees = async (req, res) => {
           panVerified: emp.panVerified || false,
           createdAt: new Date(emp.createdAt).toLocaleDateString('en-GB'),
           
+          // Field coach action tracking
+          approvedBy: emp.approvedByFieldCoach || null,
+          approvedByEmail: emp.approvedByFieldCoachEmail || null,
+          approvalDate: emp.approvalDate,
+          rejectedBy: emp.rejectedByFieldCoach || null,
+          rejectedByEmail: emp.rejectedByFieldCoachEmail || null,
+          rejectionDate: emp.rejectionDate,
+          rejectionReason: emp.rejectionReason || null,
+          deactivationApprovedBy: emp.deactivationApprovedByFieldCoach || null,
+          deactivationApprovedByEmail: emp.deactivationApprovedByFieldCoachEmail || null,
+          deactivationApprovedAt: emp.deactivationApprovedAt,
+          
           // Personal Information
           gender: emp.gender || '',
           dateOfBirth: emp.dob ? new Date(emp.dob).toLocaleDateString('en-GB') : '',
@@ -1186,7 +1198,7 @@ export const generateExportLink = async (req, res) => {
     });
 
     // Generate the public link
-    // const baseUrl = process.env.API_URL || 'http://localhost:5000/api';
+    // const baseUrl = process.env.API_URL || 'https://burgersingfrontbackend.kamaaupoot.in/api';
     const baseUrl = process.env.API_URL || 'https://burgersingfrontbackend.kamaaupoot.in/api';
     const link = `${baseUrl}/public/export-employees/${token}`;
 
